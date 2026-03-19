@@ -1,0 +1,15 @@
+[package]
+name = "alchemy-loader"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alchemy-bootinfo = { path = "../bootinfo" }
+uefi = { version = "0.36.1", features = ["alloc", "global_allocator", "logger", "panic_handler"] }
+xmas-elf = { version = "0.10.0", default-features = false }
+
+#[profile.dev]
+#panic = "abort"
+#
+#[profile.release]
+#panic = "abort"

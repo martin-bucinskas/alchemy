@@ -1,0 +1,8 @@
+[target.x86_64-unknown-uefi]
+#runner = "powershell -ExecutionPolicy Bypass -File scripts/run-qemu.ps1"
+runner = "powershell -ExecutionPolicy Bypass -File scripts/debug-qemu.ps1"
+
+#[target.x86_64-unknown-none]
+#rustflags = [
+#    "-C", "link-arg=-Tcrates/kernel/linker.ld",
+#]

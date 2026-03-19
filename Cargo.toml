@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "crates/bootinfo",
+    "crates/loader",
+    "crates/kernel",
+]
+resolver = "3"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
