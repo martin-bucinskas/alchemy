@@ -79,6 +79,7 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
     println!("[kernel] allocator initalized");
 
     gdt::init();
+    gdt::init_tss();
     println!("[kernel] gdt initalized");
 
     idt::init();
