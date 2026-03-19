@@ -78,9 +78,11 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 
     memory::init(boot_info);
     println!("[kernel] physical memory initalized");
+    memory::debug_free_frames("after memory init");
 
     allocator::init();
     println!("[kernel] allocator initalized");
+    memory::debug_free_frames("after allocator heap init");
 
     gdt::init();
     gdt::init_tss();

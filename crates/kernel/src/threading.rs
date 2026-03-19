@@ -9,7 +9,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::Mutex;
 
 use crate::cpu::hlt_loop;
-use crate::memory;
+use crate::{dbgprintln, memory};
 use crate::println;
 
 pub type ActorId = usize;
@@ -100,12 +100,17 @@ pub struct Actor {
 
 impl Actor {
     fn cleanup(&mut self) {
+        println!("[actor] cleaning up actor {}", self.id);
+
         if self.cleaned {
+            println!("[actor] actor already clean {}", self.id);
             return;
         }
         self.mailbox.clear();
         self.stack = None;
         self.cleaned = true;
+
+        memory::debug_free_frames("after actor cleanup");
     }
 }
 
@@ -147,6 +152,7 @@ impl Scheduler {
     }
 
     fn reap_terminated(&mut self) {
+        println!("[threading] reaping terminated actors");
         let current = self.current;
         for (idx, actor) in self.actors.iter_mut().enumerate() {
             if Some(idx) == current {
@@ -280,6 +286,8 @@ pub fn spawn(entry: ActorEntry, supervisor: Option<ActorId>) -> ActorId {
 
     let mut sched = SCHEDULER.lock();
     sched.actors.push(actor);
+    drop(sched);
+    memory::debug_free_frames("after actor spawn");
 
     id
 }
@@ -397,7 +405,7 @@ pub fn run() -> ! {
     }
 }
 
-pub fn crash_current_from_exception(reason: CrashReason) -> ! {
+pub fn crash_current(reason: CrashReason) -> ! {
     let target_rsp = {
         let mut sched = SCHEDULER.lock();
         sched.reap_terminated();
@@ -444,4 +452,57 @@ pub fn crash_current_from_exception(reason: CrashReason) -> ! {
 // todo: hook in - timer irq should call this once we add PIT/APIC, for time being can just do cooperative only
 pub fn tick() {
     // empty
+}
+
+pub fn panicking_actor_id() -> Option<ActorId> {
+    let sched = SCHEDULER.try_lock()?;
+    sched.current.map(|idx| sched.actors[idx].id)
+}
+
+pub fn panic_current() -> ! {
+    let Some(mut sched) = SCHEDULER.try_lock() else {
+        dbgprintln!("[panic] scheduler lock unavailable during panic");
+        crate::cpu::hlt_loop();
+    };
+
+    sched.reap_terminated();
+
+    let Some(current_idx) = sched.current else {
+        dbgprintln!("[panic] no current actor during panic");
+        crate::cpu::hlt_loop();
+    };
+
+    let child_id = sched.actors[current_idx].id;
+    let supervisor = sched.actors[current_idx].supervisor;
+    sched.actors[current_idx].state = ActorState::Crashed;
+
+    if let Some(supervisor_id) = supervisor {
+        if let Some(supervisor_idx) = sched.actor_index_by_id(supervisor_id) {
+            let parent = &mut sched.actors[supervisor_idx];
+            parent.mailbox.push_back(Message::ChildCrashed {
+                child: child_id,
+                reason: CrashReason::Panic,
+            });
+
+            if parent.state == ActorState::Waiting {
+                parent.state = ActorState::Ready;
+            }
+        }
+    }
+
+    let target_rsp = match sched.pick_next_ready(Some(current_idx)) {
+        Some(next_idx) => {
+            sched.actors[next_idx].state = ActorState::Running;
+            sched.current = Some(next_idx);
+            sched.actors[next_idx].context.rsp
+        }
+        None => {
+            sched.current = None;
+            sched.scheduler_rsp
+        }
+    };
+
+    drop(sched);
+
+    unsafe { alchemy_jump_to(target_rsp) }
 }

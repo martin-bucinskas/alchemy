@@ -42,7 +42,7 @@ extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
   println!("EXCEPTION: BREAKPOINT");
   println!("{:#?}", stack_frame);
 
-  threading::crash_current_from_exception(CrashReason::Breakpoint)
+  threading::crash_current(CrashReason::Breakpoint)
 }
 
 extern "x86-interrupt" fn divide_error_handler(stack_frame: InterruptStackFrame) {
@@ -50,7 +50,7 @@ extern "x86-interrupt" fn divide_error_handler(stack_frame: InterruptStackFrame)
   println!("EXCEPTION: DIVIDE ERROR");
   println!("{:#?}", stack_frame);
 
-  threading::crash_current_from_exception(CrashReason::DivideError)
+  threading::crash_current(CrashReason::DivideError)
 }
 
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
@@ -58,7 +58,7 @@ extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFram
   println!("EXCEPTION: INVALID OPCODE");
   println!("{:#?}", stack_frame);
 
-  threading::crash_current_from_exception(CrashReason::InvalidOpcode)
+  threading::crash_current(CrashReason::InvalidOpcode)
 }
 
 extern "x86-interrupt" fn page_fault_handler(
@@ -71,7 +71,7 @@ extern "x86-interrupt" fn page_fault_handler(
   println!("Error code: {:?}", error_code);
   println!("{:#?}", stack_frame);
 
-  threading::crash_current_from_exception(CrashReason::PageFault)
+  threading::crash_current(CrashReason::PageFault)
 }
 
 extern "x86-interrupt" fn general_protection_fault_handler(
@@ -83,7 +83,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
   println!("Raw error code: {:#x}", error_code);
   println!("{:#?}", stack_frame);
 
-  threading::crash_current_from_exception(CrashReason::GeneralProtectionFault)
+  threading::crash_current(CrashReason::GeneralProtectionFault)
 }
 
 extern "x86-interrupt" fn double_fault_handler(

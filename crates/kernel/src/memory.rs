@@ -284,3 +284,35 @@ const fn align_up_u64(value: u64, align: u64) -> u64 {
 const fn align_down_u64(value: u64, align: u64) -> u64 {
   value & !(align - 1)
 }
+
+pub fn free_frames_remaining() -> u64 {
+  FRAME_ALLOCATOR
+    .lock()
+    .as_ref()
+    .map(|alloc| alloc.free_frames_remaining())
+    .unwrap_or(0)
+}
+
+pub fn free_region_count() -> usize {
+  FRAME_ALLOCATOR
+    .lock()
+    .as_ref()
+    .map(|alloc| alloc.region_count())
+    .unwrap_or(0)
+}
+
+pub fn debug_free_frames(label: &str) {
+  let frames = free_frames_remaining();
+  let kib = frames * 4;
+  let mib = kib / 1024;
+  let regions = free_region_count();
+
+  println!(
+    "[memory] {}: {} free frames ({} KiB, {} MiB) across {} regions",
+    label,
+    frames,
+    kib,
+    mib,
+    regions
+  );
+}
