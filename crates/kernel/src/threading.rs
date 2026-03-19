@@ -10,12 +10,12 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::Mutex;
 
 use crate::cpu::hlt_loop;
-use crate::println;
+use crate::{memory, println};
 
 pub type ActorId = usize;
 pub type ActorEntry = fn();
 
-const DEFAULT_STACK_SIZE: usize = 16 * 1024;
+const DEFAULT_STACK_PAGES: usize = 4; // 4 * 4096 = 16 KiB
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActorState {
@@ -58,7 +58,7 @@ pub struct Actor {
     supervisor: Option<ActorId>,
     state: ActorState,
     context: ActorContext,
-    stack: Option<Box<[u8]>>,
+    stack: Option<ActorStack>,
     mailbox: VecDeque<Message>,
     entry: ActorEntry,
     cleaned: bool,
@@ -72,6 +72,39 @@ impl Actor {
         self.mailbox.clear();
         self.stack = None;
         self.cleaned = true;
+    }
+}
+
+struct ActorStack {
+    base: *mut u8,
+    pages: usize,
+}
+
+unsafe impl Send for ActorStack {}
+
+impl ActorStack {
+    fn new(pages: usize) -> Self {
+        let addr = memory::alloc_pages(pages)
+          .expect("failed to allocate actor stack pages");
+
+        let size = pages * memory::PAGE_SIZE;
+
+        unsafe {
+            core::ptr::write_bytes(addr as *mut u8, 0, size);
+        }
+
+        Self {
+            base: addr as *mut u8,
+            pages,
+        }
+    }
+
+    fn top(&self) -> u64 {
+        unsafe { self.base.add(self.pages * memory::PAGE_SIZE) as u64 }
+    }
+
+    fn size_bytes(&self) -> usize {
+        self.pages * memory::PAGE_SIZE
     }
 }
 
@@ -133,7 +166,6 @@ static SCHEDULER: Mutex<Scheduler> = Mutex::new(Scheduler::new());
 global_asm!(
     r#"
     .global alchemy_context_switch
-    .intel_syntax noprefix
 alchemy_context_switch:
     push rbp
     push rbx
@@ -141,8 +173,8 @@ alchemy_context_switch:
     push r13
     push r14
     push r15
-    mov [rcx], rsp
-    mov rsp, rdx
+    mov [rdi], rsp
+    mov rsp, rsi
     pop r15
     pop r14
     pop r13
@@ -153,7 +185,7 @@ alchemy_context_switch:
 
     .global alchemy_jump_to
 alchemy_jump_to:
-    mov rsp, rcx
+    mov rsp, rdi
     pop r15
     pop r14
     pop r13
@@ -164,7 +196,7 @@ alchemy_jump_to:
 "#
 );
 
-unsafe extern "efiapi" {
+unsafe extern "C" {
     fn alchemy_context_switch(old_rsp: *mut u64, new_rsp: u64);
     fn alchemy_jump_to(new_rsp: u64) -> !;
 }
@@ -177,7 +209,7 @@ fn push_u64(stack_top: u64, value: u64) -> u64 {
     new_top
 }
 
-fn build_initial_stack(stack_top: u64, entry_point: extern "efiapi" fn() -> !) -> u64 {
+fn build_initial_stack(stack_top: u64, entry_point: extern "C" fn() -> !) -> u64 {
     let mut rsp = stack_top & !0xF;
 
     // extra dummy slot so that after:
@@ -196,7 +228,7 @@ fn build_initial_stack(stack_top: u64, entry_point: extern "efiapi" fn() -> !) -
     rsp
 }
 
-extern "efiapi" fn actor_bootstrap() -> ! {
+extern "C" fn actor_bootstrap() -> ! {
     let entry = {
         let sched = SCHEDULER.lock();
         let idx = sched.current.expect("actor_bootstrap without current actor");
@@ -235,8 +267,8 @@ fn actor_exited() -> ! {
 pub fn spawn(entry: ActorEntry, supervisor: Option<ActorId>) -> ActorId {
     let id = NEXT_ACTOR_ID.fetch_add(1, Ordering::SeqCst);
 
-    let mut stack = vec![0u8; DEFAULT_STACK_SIZE].into_boxed_slice();
-    let stack_top = unsafe { stack.as_mut_ptr().add(stack.len()) as u64 };
+    let mut stack = ActorStack::new(DEFAULT_STACK_PAGES);
+    let stack_top = stack.top();
     let rsp = build_initial_stack(stack_top, actor_bootstrap);
 
     let actor = Actor {
