@@ -1,7 +1,6 @@
 use alloc::{
     boxed::Box,
     collections::VecDeque,
-    vec,
     vec::Vec,
 };
 use core::arch::global_asm;
@@ -10,12 +9,13 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::Mutex;
 
 use crate::cpu::hlt_loop;
-use crate::{memory, println};
+use crate::memory;
+use crate::println;
 
 pub type ActorId = usize;
 pub type ActorEntry = fn();
 
-const DEFAULT_STACK_PAGES: usize = 4; // 4 * 4096 = 16 KiB
+const DEFAULT_STACK_PAGES: usize = 4; // 16 KiB
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActorState {
@@ -53,6 +53,40 @@ struct ActorContext {
     rsp: u64,
 }
 
+struct ActorStack {
+    base: *mut u8,
+    pages: usize,
+}
+
+unsafe impl Send for ActorStack {}
+
+impl ActorStack {
+    fn new(pages: usize) -> Self {
+        let addr = memory::alloc_pages(pages)
+          .expect("failed to allocate actor stack pages");
+        let size = pages * memory::PAGE_SIZE;
+
+        unsafe {
+            core::ptr::write_bytes(addr as *mut u8, 0, size);
+        }
+
+        Self {
+            base: addr as *mut u8,
+            pages,
+        }
+    }
+
+    fn top(&self) -> u64 {
+        unsafe { self.base.add(self.pages * memory::PAGE_SIZE) as u64 }
+    }
+}
+
+impl Drop for ActorStack {
+    fn drop(&mut self) {
+        memory::free_pages(self.base as u64, self.pages);
+    }
+}
+
 pub struct Actor {
     id: ActorId,
     supervisor: Option<ActorId>,
@@ -72,39 +106,6 @@ impl Actor {
         self.mailbox.clear();
         self.stack = None;
         self.cleaned = true;
-    }
-}
-
-struct ActorStack {
-    base: *mut u8,
-    pages: usize,
-}
-
-unsafe impl Send for ActorStack {}
-
-impl ActorStack {
-    fn new(pages: usize) -> Self {
-        let addr = memory::alloc_pages(pages)
-          .expect("failed to allocate actor stack pages");
-
-        let size = pages * memory::PAGE_SIZE;
-
-        unsafe {
-            core::ptr::write_bytes(addr as *mut u8, 0, size);
-        }
-
-        Self {
-            base: addr as *mut u8,
-            pages,
-        }
-    }
-
-    fn top(&self) -> u64 {
-        unsafe { self.base.add(self.pages * memory::PAGE_SIZE) as u64 }
-    }
-
-    fn size_bytes(&self) -> usize {
-        self.pages * memory::PAGE_SIZE
     }
 }
 
@@ -212,18 +213,14 @@ fn push_u64(stack_top: u64, value: u64) -> u64 {
 fn build_initial_stack(stack_top: u64, entry_point: extern "C" fn() -> !) -> u64 {
     let mut rsp = stack_top & !0xF;
 
-    // extra dummy slot so that after:
-    //   pop r15..rbp; ret
-    // the entered function sees the same alignment as a normal call
     rsp = push_u64(rsp, 0);
-
-    rsp = push_u64(rsp, entry_point as usize as u64); // ret -> actor_bootstrap
-    rsp = push_u64(rsp, 0); // rbp
-    rsp = push_u64(rsp, 0); // rbx
-    rsp = push_u64(rsp, 0); // r12
-    rsp = push_u64(rsp, 0); // r13
-    rsp = push_u64(rsp, 0); // r14
-    rsp = push_u64(rsp, 0); // r15
+    rsp = push_u64(rsp, entry_point as usize as u64);
+    rsp = push_u64(rsp, 0);
+    rsp = push_u64(rsp, 0);
+    rsp = push_u64(rsp, 0);
+    rsp = push_u64(rsp, 0);
+    rsp = push_u64(rsp, 0);
+    rsp = push_u64(rsp, 0);
 
     rsp
 }
@@ -236,7 +233,6 @@ extern "C" fn actor_bootstrap() -> ! {
     };
 
     entry();
-
     actor_exited()
 }
 
@@ -267,7 +263,7 @@ fn actor_exited() -> ! {
 pub fn spawn(entry: ActorEntry, supervisor: Option<ActorId>) -> ActorId {
     let id = NEXT_ACTOR_ID.fetch_add(1, Ordering::SeqCst);
 
-    let mut stack = ActorStack::new(DEFAULT_STACK_PAGES);
+    let stack = ActorStack::new(DEFAULT_STACK_PAGES);
     let stack_top = stack.top();
     let rsp = build_initial_stack(stack_top, actor_bootstrap);
 
@@ -352,7 +348,6 @@ fn yield_internal(crashed: bool) {
         let current_idx = sched.current.expect("yield_internal without current actor");
 
         if crashed {
-            // leave actor state as already-set Crashed
         }
 
         let old_rsp_ptr = &mut sched.actors[current_idx].context.rsp as *mut u64;
