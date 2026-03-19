@@ -5,36 +5,41 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use linked_list_allocator::LockedHeap;
 
 use crate::{println, cpu::hlt_loop};
+use crate::memory::{alloc_pages, PAGE_SIZE};
 
 #[global_allocator]
 static ALLOCATOR: LockedHeap = LockedHeap::empty();
 
-const HEAP_SIZE: usize = 1024 * 1024; // 1 MiB for now - probably increase at some point
-
-#[repr(C, align(16))]
-struct HeapSpace([MaybeUninit<u8>; HEAP_SIZE]);
-
-static mut HEAP_SPACE: HeapSpace = HeapSpace([MaybeUninit::uninit(); HEAP_SIZE]);
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+const HEAP_PAGES: usize = 256; // 256 = 1 MiB
 
 pub fn init() {
   if INITIALIZED.swap(true, Ordering::SeqCst) {
     return;
   }
 
+  let heap_start = alloc_pages(HEAP_PAGES)
+    .expect("failed to allocate physical pages for kernel heap");
+  let heap_size = HEAP_PAGES * PAGE_SIZE;
+
   unsafe {
-    let heap_start = core::ptr::addr_of_mut!(HEAP_SPACE) as *mut u8;
-    ALLOCATOR.lock().init(heap_start, HEAP_SIZE);
+    core::ptr::write_bytes(heap_start as *mut u8, 0, heap_size);
+    ALLOCATOR.lock().init(heap_start as *mut u8, heap_size);
   }
 
-  println!("Heap allocator initialized ({} KiB)", HEAP_SIZE / 1024);
+  println!(
+    "[allocator] heap initialized at 0x{:x} ({} KiB)",
+    heap_start,
+    heap_size / 1024
+  );
 }
 
 #[cfg(not(test))]
 #[alloc_error_handler]
 fn alloc_error_handler(layout: Layout) -> ! {
   println!(
-    "allocation error: size={} align={}",
+    "[allocator] allocation error: size={} align={}",
     layout.size(),
     layout.align()
   );

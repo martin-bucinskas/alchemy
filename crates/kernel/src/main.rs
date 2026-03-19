@@ -21,6 +21,7 @@ mod idt;
 mod panic;
 mod threading;
 mod debug;
+mod memory;
 
 static WORKER_ID: AtomicUsize = AtomicUsize::new(0);
 static SUPERVISOR_ID: AtomicUsize = AtomicUsize::new(0);
@@ -74,6 +75,9 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 
     console::init(boot_info.framebuffer);
     println!("[kernel] console initalized");
+
+    memory::init(boot_info);
+    println!("[kernel] physical memory initalized");
 
     allocator::init();
     println!("[kernel] allocator initalized");
