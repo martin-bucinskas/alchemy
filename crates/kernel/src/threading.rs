@@ -9,7 +9,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::Mutex;
 
 use crate::cpu::hlt_loop;
-use crate::{dbgprintln, memory};
+use crate::{dbgprintln, memory, paging};
 use crate::println;
 
 pub type ActorId = usize;
@@ -53,39 +53,7 @@ struct ActorContext {
     rsp: u64,
 }
 
-struct ActorStack {
-    base: *mut u8,
-    pages: usize,
-}
-
-unsafe impl Send for ActorStack {}
-
-impl ActorStack {
-    fn new(pages: usize) -> Self {
-        let addr = memory::alloc_pages(pages)
-          .expect("failed to allocate actor stack pages");
-        let size = pages * memory::PAGE_SIZE;
-
-        unsafe {
-            core::ptr::write_bytes(addr as *mut u8, 0, size);
-        }
-
-        Self {
-            base: addr as *mut u8,
-            pages,
-        }
-    }
-
-    fn top(&self) -> u64 {
-        unsafe { self.base.add(self.pages * memory::PAGE_SIZE) as u64 }
-    }
-}
-
-impl Drop for ActorStack {
-    fn drop(&mut self) {
-        memory::free_pages(self.base as u64, self.pages);
-    }
-}
+type ActorStack = paging::GuardedStack;
 
 pub struct Actor {
     id: ActorId,
@@ -269,7 +237,7 @@ fn actor_exited() -> ! {
 pub fn spawn(entry: ActorEntry, supervisor: Option<ActorId>) -> ActorId {
     let id = NEXT_ACTOR_ID.fetch_add(1, Ordering::SeqCst);
 
-    let stack = ActorStack::new(DEFAULT_STACK_PAGES);
+    let stack = paging::alloc_stack_with_guard(DEFAULT_STACK_PAGES);
     let stack_top = stack.top();
     let rsp = build_initial_stack(stack_top, actor_bootstrap);
 

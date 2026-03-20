@@ -3,6 +3,7 @@
 
 mod graphics;
 mod debug;
+mod paging;
 
 extern crate alloc;
 
@@ -39,26 +40,34 @@ fn main() -> Status {
     );
     draw_loader_test_pattern(framebuffer);
     clear_framebuffer(framebuffer, 0, 0, 40);
-    fill_rect(framebuffer, 20, 20, 30, 30, 255, 0, 0); // stage 1
+    fill_rect(framebuffer, 20, 20, 30, 30, 255, 0, 0);
 
     let boot_info_ptr = allocate_boot_info_slot();
     ldbgprintln!("L2: boot info slot allocated at {:p}", boot_info_ptr);
-    fill_rect(framebuffer, 60, 20, 30, 30, 255, 255, 0); // stage 2
+    fill_rect(framebuffer, 60, 20, 30, 30, 255, 255, 0);
 
     let kernel_entry = {
         let kernel_bytes = read_kernel_file(KERNEL_PATH);
         ldbgprintln!("L3: read kernel.elf ({} bytes)", kernel_bytes.len());
-        fill_rect(framebuffer, 100, 20, 30, 30, 0, 255, 255); // stage 3
+        fill_rect(framebuffer, 100, 20, 30, 30, 0, 255, 255);
 
         let entry = load_elf_kernel(&kernel_bytes);
         ldbgprintln!("L4: ELF loaded, entry = 0x{:x}", entry);
-        fill_rect(framebuffer, 140, 20, 30, 30, 255, 0, 255); // stage 4
+        fill_rect(framebuffer, 140, 20, 30, 30, 255, 0, 255);
 
         entry
     };
 
+    let max_phys_end = paging::highest_phys_end();
+    let new_p4_phys = paging::build_kernel_page_tables(max_phys_end);
+    ldbgprintln!(
+        "L4.5: new page tables ready, p4=0x{:x}, phys_window=0x{:x}",
+        new_p4_phys,
+        paging::PHYSICAL_MEMORY_OFFSET
+    );
+
     ldbgprintln!("L5: exiting boot services");
-    fill_rect(framebuffer, 180, 20, 30, 30, 0, 255, 0); // stage 5 before EBS
+    fill_rect(framebuffer, 180, 20, 30, 30, 0, 255, 0);
 
     let memory_map = ManuallyDrop::new(unsafe { boot::exit_boot_services(None) });
 
@@ -69,7 +78,12 @@ fn main() -> Status {
             memory_map_len: memory_map.buffer().len(),
             memory_map_desc_size: memory_map.meta().desc_size,
             memory_map_desc_version: memory_map.meta().desc_version,
+            physical_memory_offset: paging::PHYSICAL_MEMORY_OFFSET,
         });
+    }
+
+    unsafe {
+        paging::switch_to_page_tables(new_p4_phys);
     }
 
     ldbgprintln!("L6: jumping to kernel entry 0x{:x}", kernel_entry);

@@ -23,6 +23,7 @@ version = "0.1.0"
 dependencies = [
  "alchemy-bootinfo",
  "uefi",
+ "x86_64",
  "xmas-elf",
 ]
 

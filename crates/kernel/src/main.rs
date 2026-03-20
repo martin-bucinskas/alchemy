@@ -22,6 +22,7 @@ mod panic;
 mod threading;
 mod debug;
 mod memory;
+mod paging;
 
 static WORKER_ID: AtomicUsize = AtomicUsize::new(0);
 static SUPERVISOR_ID: AtomicUsize = AtomicUsize::new(0);
@@ -80,16 +81,19 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
     println!("[kernel] physical memory initalized");
     memory::debug_free_frames("after memory init");
 
-    allocator::init();
-    println!("[kernel] allocator initalized");
-    memory::debug_free_frames("after allocator heap init");
-
     gdt::init();
     gdt::init_tss();
     println!("[kernel] gdt initalized");
 
     idt::init();
     println!("[kernel] idt initalized");
+
+    paging::init(boot_info);
+    println!("[kernel] paging initalized");
+
+    allocator::init();
+    println!("[kernel] allocator initalized");
+    memory::debug_free_frames("after allocator heap init");
 
     println!("[kernel] alchemy kernel started");
     println!(

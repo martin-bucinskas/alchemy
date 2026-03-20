@@ -28,4 +28,6 @@ pub struct BootInfo {
     pub memory_map_len: usize,
     pub memory_map_desc_size: usize,
     pub memory_map_desc_version: u32,
+    
+    pub physical_memory_offset: u64,
 }

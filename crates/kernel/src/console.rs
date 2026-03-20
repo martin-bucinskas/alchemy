@@ -3,7 +3,7 @@ use core::fmt::Write;
 
 use spin::Mutex;
 use alchemy_bootinfo::FramebufferInfo;
-
+use crate::dbgprint;
 use crate::font::{glyph, GLYPH_HEIGHT, GLYPH_WIDTH};
 use crate::graphics::Framebuffer;
 
@@ -24,6 +24,7 @@ pub fn set_colors(fg: (u8, u8, u8), bg: (u8, u8, u8)) {
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments<'_>) {
+  dbgprint!("{}", args);
   let mut guard = WRITER.lock();
   if let Some(writer) = guard.as_mut() {
     let _ = writer.write_fmt(args);
